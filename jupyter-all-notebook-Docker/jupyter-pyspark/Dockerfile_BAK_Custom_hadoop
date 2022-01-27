@@ -1,0 +1,109 @@
+# Copyright (c) Jupyter Development Team.
+# Distributed under the terms of the Modified BSD License.
+ARG OWNER=jupyter
+ARG BASE_CONTAINER=$OWNER/scipy-notebook
+FROM $BASE_CONTAINER
+
+LABEL maintainer="Giorgos Alexiou <galexiou@gmail.com>"
+
+# Fix DL4006
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+USER root
+
+# Spark dependencies
+# Default values can be overridden at build time
+# (ARGS are in lower case to distinguish them from ENV)
+ARG spark_version="3.2.0"
+ARG hadoop_version="3.3.1"
+ARG spark_checksum="EBE51A449EBD070BE7D3570931044070E53C23076ABAD233B3C51D45A7C99326CF55805EE0D573E6EB7D6A67CFEF1963CD77D6DC07DD2FD70FD60DA9D1F79E5E"
+ARG openjdk_version="11"
+ARG iceberg_version="0.12.1"
+
+ENV APACHE_SPARK_VERSION="${spark_version}" \
+    HADOOP_VERSION="${hadoop_version}" \
+    ICEBERG_VERSION="${iceberg_version}"
+
+RUN apt-get update --yes && \
+    apt-get install --yes --no-install-recommends \
+    "openjdk-${openjdk_version}-jre-headless" \
+    ca-certificates-java && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+ENV JAVA_HOME="/usr/lib/jvm/java-11-openjdk-amd64/"
+
+# Spark installation
+WORKDIR /tmp
+# RUN wget -q "https://archive.apache.org/dist/spark/spark-${APACHE_SPARK_VERSION}/spark-${APACHE_SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}.tgz" && \
+RUN wget -q "https://archive.apache.org/dist/spark/spark-${APACHE_SPARK_VERSION}/spark-${APACHE_SPARK_VERSION}-bin-without-hadoop.tgz" && \
+    # echo "${spark_checksum} *spark-${APACHE_SPARK_VERSION}-bin-without-hadoop.tgz" | sha512sum -c - && \
+    tar xzf "spark-${APACHE_SPARK_VERSION}-bin-without-hadoop.tgz" -C /usr/local --owner root --group root --no-same-owner && \
+    rm "spark-${APACHE_SPARK_VERSION}-bin-without-hadoop.tgz"
+
+#add iceberg support to spark_version
+RUN wget -q "https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark3-runtime/${ICEBERG_VERSION}/iceberg-spark3-runtime-${ICEBERG_VERSION}.jar" && \
+mv  "iceberg-spark3-runtime-${ICEBERG_VERSION}.jar" /usr/local/spark-${APACHE_SPARK_VERSION}-bin-without-hadoop/jars/
+
+# Download and extract the Hadoop binary package.
+RUN mkdir /opt/hadoop
+RUN wget -q "https://archive.apache.org/dist/hadoop/core/hadoop-$HADOOP_VERSION/hadoop-$HADOOP_VERSION.tar.gz" \
+	# | tar xvz -C /opt/  \
+  && tar xzf "hadoop-$HADOOP_VERSION.tar.gz" -C /opt/ \
+	&& mv -v /opt/hadoop-$HADOOP_VERSION/* /opt/hadoop \
+	&& rm -r /opt/hadoop/share/doc \
+  && rm hadoop-$HADOOP_VERSION.tar.gz
+
+
+  # Add S3a jars to the classpath using this hack.
+  RUN ln -s /opt/hadoop/share/hadoop/tools/lib/hadoop-aws* /opt/hadoop/share/hadoop/common/lib/ && \
+      ln -s /opt/hadoop/share/hadoop/tools/lib/aws-java-sdk* /opt/hadoop/share/hadoop/common/lib/
+
+
+  # Add Azure jars to the classpath using this hack.
+  RUN ln -s /opt/hadoop/share/hadoop/tools/lib/azure-data* /opt/hadoop/share/hadoop/common/lib/ && \
+      ln -s /opt/hadoop/share/hadoop/tools/lib/hadoop-azure* /opt/hadoop/share/hadoop/common/lib/ && \
+  		ln -s /opt/hadoop/share/hadoop/tools/lib/azure-storage* /opt/hadoop/share/hadoop/common/lib/ && \
+  		ln -s /opt/hadoop/share/hadoop/tools/lib/azure-keyvault* /opt/hadoop/share/hadoop/common/lib/
+
+
+# ENV SPARK_DIST_CLASSPATH="$($HADOOP_HOME)/bin/hadoop classpath)"
+# ENV SPARK_DIST_CLASSPATH="$(/opt/hadoop/bin/hadoop classpath)"
+
+WORKDIR /usr/local
+
+# Configure Spark
+ENV SPARK_HOME=/usr/local/spark
+ENV HADOOP_HOME="/opt/hadoop"
+ENV PATH="$SPARK_HOME/bin:$HADOOP_HOME/bin:$PATH"
+
+ENV SPARK_OPTS="--driver-java-options=-Xms1024M --driver-java-options=-Xmx4096M --driver-java-options=-Dlog4j.logLevel=info" \
+    PATH="${PATH}:${SPARK_HOME}/bin"
+
+RUN ln -s "spark-${APACHE_SPARK_VERSION}-bin-without-hadoop" spark && \
+    # Add a link in the before_notebook hook in order to source automatically PYTHONPATH
+    mkdir -p /usr/local/bin/before-notebook.d && \
+    ln -s "${SPARK_HOME}/sbin/spark-config.sh" /usr/local/bin/before-notebook.d/spark-config.sh
+
+# RUN cp -p "${SPARK_HOME}/conf/spark-env.sh.template" "${SPARK_HOME}/conf/spark-env.sh" && \
+# echo 'export SPARK_DIST_CLASSPATH="$(/opt/hadoop/bin/hadoop classpath)"' >> "${SPARK_HOME}/conf/spark-env.sh"
+# Fix Spark installation for Java 11 and Apache Arrow library
+# see: https://github.com/apache/spark/pull/27356, https://spark.apache.org/docs/latest/#downloading
+RUN cp -p "${SPARK_HOME}/conf/spark-defaults.conf.template" "${SPARK_HOME}/conf/spark-defaults.conf" && \
+    echo 'spark.driver.extraJavaOptions -Dio.netty.tryReflectionSetAccessible=true' >> "${SPARK_HOME}/conf/spark-defaults.conf" && \
+    echo 'spark.executor.extraJavaOptions -Dio.netty.tryReflectionSetAccessible=true' >> "${SPARK_HOME}/conf/spark-defaults.conf"
+    #echo 'spark.jars.packages org.apache.hadoop:hadoop-azure:3.2.1'  >> "${SPARK_HOME}/conf/spark-defaults.conf"
+
+# Configure IPython system-wide
+COPY ipython_kernel_config.py "/etc/ipython/"
+RUN fix-permissions "/etc/ipython/"
+
+USER ${NB_UID}
+
+# Install pyarrow
+RUN mamba install --quiet --yes \
+    'pyarrow' && \
+    mamba clean --all -f -y && \
+    fix-permissions "${CONDA_DIR}" && \
+    fix-permissions "/home/${NB_USER}"
+
+WORKDIR "${HOME}"
