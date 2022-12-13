@@ -48,12 +48,24 @@ spec:
           volumeMounts:
             - name: jupyter-home
               mountPath: /home/jovyan
+            - name: jupyter-cfg-vol
+              mountPath: /opt/hadoop/etc/hadoop/core-site.xml
+              subPath: core-site.xml
+            - name: jupyter-cfg-vol
+              mountPath: /usr/local/spark/conf/hive-site.xml
+              subPath: hive-site.xml
+            - name: jupyter-cfg-vol
+              mountPath: /home/jovyan/.sparkmagic/config.json
+              subPath: config.json
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:
         - name: jupyter-home
           persistentVolumeClaim:
             claimName: {{ .Values.persistence.existingClaim | default (printf "jupyter-pv-claim") }}
+        - name: jupyter-cfg-vol
+          configMap:
+            name: jupyter-cfg
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

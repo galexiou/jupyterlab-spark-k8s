@@ -9,7 +9,7 @@ image:
   # imagename: all-spark-notebook
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: "all-spark-notebook"
+  tag: "all-spark-notebook-3.3.1"
 
 imagePullSecrets: []
 nameOverride: ""
@@ -51,13 +51,13 @@ persistence:
   enabled: true
   accessMode: "ReadWriteOnce"
   # The storage space that should be claimed from the persistent volume
-  size: 9Gi
+  size: 10Gi
   # If defined, storageClassName: <storageClass>
   # If set to "-", storageClassName: "", which disables dynamic provisioning
   # If undefined (the default) or set to null, no storageClassName spec is
   # set, choosing 'standard' storage class available with the default provisioner (gcd-pd on GKE, hostpath on minikube, etc).
 
-  storageClass: rook-ceph-block
+  storageClass: managed-csi-premium
   # A manually managed Persistent Volume and Claim
   # If defined, PVC must be created manually before volume will be bound
   existingClaim:
