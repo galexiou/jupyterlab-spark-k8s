@@ -5,11 +5,11 @@
 replicaCount: 1
 
 image:
-  repository: galexiou
+  repository: galexiou/all-spark-notebook-3.3.1
   # imagename: all-spark-notebook
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: "all-spark-notebook-3.3.1"
+  tag: "latest"
 
 imagePullSecrets: []
 nameOverride: ""
@@ -57,7 +57,7 @@ persistence:
   # If undefined (the default) or set to null, no storageClassName spec is
   # set, choosing 'standard' storage class available with the default provisioner (gcd-pd on GKE, hostpath on minikube, etc).
 
-  storageClass: managed-csi-premium
+  storageClass: eda-azurefile-standard-jupyter
   # A manually managed Persistent Volume and Claim
   # If defined, PVC must be created manually before volume will be bound
   existingClaim:
